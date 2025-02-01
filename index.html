@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Indoor and Outdoor Air Quality Data</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f4;
+        margin: 20px;
+      }
+      #indoorChart,
+      #outdoorChart {
+        width: 100%;
+        height: 750px;
+        margin-bottom: 50px;
+      }
+      .latest-entry {
+        margin-top: 10px;
+        font-size: 16px;
+        color: #333;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Indoor Nodes - Air Quality Data</h1>
+    <div id="indoorChart"></div>
+    <div id="indoorLatestEntries"></div>
+
+    <h1>Outdoor Nodes - Air Quality Data</h1>
+    <div id="outdoorChart"></div>
+    <div id="outdoorLatestEntries"></div>
+
+    <script>
+      // Function to fetch data from ThingSpeak
+      async function fetchData(channelID, apiKey) {
+        const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${apiKey}&results=200`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return data.feeds || [];
+      }
+
+      // Function to average data for every minute
+      function averageData(feeds) {
+        const averages = {};
+
+        feeds.forEach((feed) => {
+          const date = new Date(feed.created_at);
+          const timeKey = new Date(
+            date.getTime() - date.getSeconds() * 1000
+          ).toISOString(); // Round down to the nearest minute
+
+          if (!averages[timeKey]) {
+            averages[timeKey] = { pm25: [], pm10: [] };
+          }
+
+          averages[timeKey].pm25.push(parseFloat(feed.field3)); // PM2.5
+          averages[timeKey].pm10.push(parseFloat(feed.field4)); // PM10
+        });
+
+        // Calculate averages
+        return Object.entries(averages).map(([time, values]) => ({
+          created_at: time,
+          field3: values.pm25.length
+            ? (
+                values.pm25.reduce((a, b) => a + b) / values.pm25.length
+              ).toFixed(2)
+            : null,
+          field4: values.pm10.length
+            ? (
+                values.pm10.reduce((a, b) => a + b) / values.pm10.length
+              ).toFixed(2)
+            : null,
+        }));
+      }
+
+      // Function to format date to IST
+      function formatDateToIST(dateString) {
+        const options = {
+          timeZone: "Asia/Kolkata",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        };
+        return new Intl.DateTimeFormat("en-IN", options).format(
+          new Date(dateString)
+        );
+      }
+
+      // Function to plot data and display latest entries
+      async function plotData() {
+        const indoorChannels = [
+          { id: 2657305, apiKey: "Z8JPQP9Z110MJJCA", label: "Indoor 1" },
+          { id: 2657592, apiKey: "8C8CH9B2JUNZWYU6", label: "Indoor 2" },
+          { id: 2657616, apiKey: "CXI1Z1HP0VVDKIG7", label: "Indoor 3" },
+          { id: 2657617, apiKey: "88KR7A5K4ASO4RE5", label: "Indoor 4" },
+        ];
+
+        const outdoorChannels = [
+          { id: 2798871, apiKey: "Y7Z214YBMAHLY62M", label: "Outdoor 1 (OBH)" },
+          { id: 2798873, apiKey: "E0SYZSY7IQIB0UIU", label: "Outdoor 2 (FSQ)" },
+          { id: 2798874, apiKey: "EVRASVUH0ANER96B", label: "Outdoor 3 (GH)" },
+          { id: 2798875, apiKey: "AY58RY8ZMFM57BS5", label: "Outdoor 4 (PH3)" },
+          {
+            id: 2798876,
+            apiKey: "2B2TI6IBY7Y1292T",
+            label: "Outdoor 5 (Thub)",
+          },
+          { id: 2798877, apiKey: "I7JVWBR5EPX3G35G", label: "Outdoor 6 (PH4)" },
+          { id: 2798879, apiKey: "D48Q8HQL6CQQH8KT", label: "Outdoor 7 (MG)" },
+          {
+            id: 2798880,
+            apiKey: "BDQJYAA5VBZRSZ9V",
+            label: "Outdoor 8 (Felicity)",
+          },
+          { id: 2718174, apiKey: "P66W0IU9ZWNQ5L6V", label: "Aparna Sarovar " },
+          { id: 2338305, apiKey: "GF3Y0YJ9J53ELXIF", label: "Ihub Car " },
+        ];
+
+        const indoorTraces = [];
+        const outdoorTraces = [];
+
+        // Define colors for channels (same color for each channel)
+        const colors = [
+          "#1f77b4", // Blue
+          "#ff7f0e", // Orange
+          "#2ca02c", // Green
+          "#d62728", // Red
+          "#9467bd", // Purple
+          "#8c564b", // Brown
+          "#e377c2", // Pink
+          "#7f7f7f", // Gray
+          "#ff1493", // Deep Pink
+          "#8b0a1a", // Maroon
+        ];
+
+        // Function to fetch, process, add traces and display latest entries
+        async function processChannel(channel, traces, colorIndex) {
+          const feeds = await fetchData(channel.id, channel.apiKey);
+
+          // Display latest entry below the chart
+          if (feeds.length > 0) {
+            const latestFeed = feeds[feeds.length - 1];
+            const latestEntryDiv = document.createElement("div");
+            latestEntryDiv.className = "latest-entry";
+            latestEntryDiv.innerHTML = `<strong>${
+              channel.label
+            } Latest Entry:</strong> PM2.5 - ${
+              latestFeed.field3
+            } µg/m³ | PM10 - ${
+              latestFeed.field4
+            } µg/m³ | Time - ${formatDateToIST(latestFeed.created_at)}`;
+            document
+              .getElementById(
+                channel.label.includes("Indoor")
+                  ? "indoorLatestEntries"
+                  : "outdoorLatestEntries"
+              )
+              .appendChild(latestEntryDiv);
+          }
+
+          const averagedFeeds = averageData(feeds);
+
+          // Filter data starting from February 2nd, 2025
+          const startDate = new Date("2025-02-02T00:00:00+05:30");
+          const filteredFeeds = averagedFeeds.filter(
+            (feed) => new Date(feed.created_at) >= startDate
+          );
+
+          const timestamps = [
+            ...new Set(filteredFeeds.map((feed) => new Date(feed.created_at))),
+          ].sort((a, b) => a - b);
+
+          const pm25 = filteredFeeds.map((feed) => parseFloat(feed.field3));
+          const pm10 = filteredFeeds.map((feed) => parseFloat(feed.field4));
+
+          traces.push({
+            x: timestamps,
+            y: pm25,
+            mode: "lines+markers",
+            name: `${channel.label} PM2.5`,
+            line: { color: colors[colorIndex] },
+            marker: { symbol: "triangle", size: 8 }, // Triangle marker for PM2.5
+          });
+
+          traces.push({
+            x: timestamps,
+            y: pm10,
+            mode: "lines+markers",
+            name: `${channel.label} PM10`,
+            line: { color: colors[colorIndex] },
+            marker: { symbol: "square", size: 8 }, // Square marker for PM10
+          });
+        }
+
+        // Process indoor channels with the same colors but different markers
+        for (let i = 0; i < indoorChannels.length; i++) {
+          await processChannel(indoorChannels[i], indoorTraces, i);
+        }
+
+        // Process outdoor channels with the same colors but different markers
+        for (let i = 0; i < outdoorChannels.length; i++) {
+          await processChannel(outdoorChannels[i], outdoorTraces, i);
+        }
+
+        // Plot indoor data
+        Plotly.newPlot("indoorChart", indoorTraces, {
+          title: "Indoor Air Quality Data Over Time",
+          xaxis: {
+            title: "Timestamp",
+            tickangle: -45,
+            type: "date",
+            rangeslider: { visible: true },
+          },
+          yaxis: {
+            title: "Concentration (µg/m³)",
+            rangemode: "tozero",
+          },
+        });
+
+        // Plot outdoor data
+        Plotly.newPlot("outdoorChart", outdoorTraces, {
+          title: "Outdoor Air Quality Data Over Time",
+          xaxis: {
+            title: "Timestamp",
+            tickangle: -45,
+            type: "date",
+            rangeslider: { visible: true },
+          },
+          yaxis: {
+            title: "Concentration (µg/m³)",
+            rangemode: "tozero",
+          },
+        });
+      }
+
+      // Call the plotting function
+      plotData();
+    </script>
+  </body>
+</html>
